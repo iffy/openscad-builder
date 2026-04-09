@@ -1,6 +1,7 @@
 name: Build OpenSCAD for macOS
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       openscad_ref:
@@ -11,15 +12,15 @@ on:
 jobs:
   build:
     name: Build (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            runner: macos-13
           - arch: arm64
-            runner: macos-14
+            dep_flag: -a
+          - arch: x86_64
+            dep_flag: -x
 
     steps:
       - name: Checkout OpenSCAD
@@ -29,56 +30,48 @@ jobs:
           ref: ${{ inputs.openscad_ref }}
           submodules: recursive
 
-      - name: Install dependencies
+      - name: Install build prerequisites
+        run: brew install automake libtool cmake pkg-config wget meson python-packaging
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ../libraries
+          key: macos-deps-${{ matrix.arch }}-${{ hashFiles('scripts/macosx-build-dependencies.sh') }}
+
+      - name: Build dependencies
         run: |
-          brew update
-          brew install --quiet \
-            cmake ninja \
-            qt@5 \
-            cgal \
-            boost \
-            eigen \
-            glew \
-            glib \
-            fontconfig \
-            freetype \
-            harfbuzz \
-            double-conversion \
-            lib3mf \
-            gettext \
-            imagemagick \
-            opencsg
+          source scripts/setenv-macos.sh
+          ./scripts/macosx-build-dependencies.sh ${{ matrix.dep_flag }}
 
       - name: Configure
         run: |
-          mkdir build
-          cd build
-          cmake .. \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
-            -DUSE_BUILTIN_OPENCSG=OFF
+          source scripts/setenv-macos.sh
+          cmake -B build \
+            -DEXPERIMENTAL=1 \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
 
       - name: Build
         run: |
-          cd build
-          ninja -j$(sysctl -n hw.logicalcpu)
+          source scripts/setenv-macos.sh
+          cmake --build build -j$(sysctl -n hw.logicalcpu)
 
-      - name: Package app bundle
+      - name: Install
         run: |
-          cd build
-          # Bundle Qt and other libs into the .app
-          QT_BIN="$(brew --prefix qt@5)/bin"
-          "$QT_BIN/macdeployqt" OpenSCAD.app -dmg
-          # Rename so artifact filenames are distinct
-          mv OpenSCAD.dmg OpenSCAD-${{ matrix.arch }}.dmg
+          source scripts/setenv-macos.sh
+          cmake --install build
+
+      - name: Package as DMG
+        run: |
+          source scripts/setenv-macos.sh
+          "$OPENSCAD_LIBRARIES/bin/macdeployqt" build/OpenSCAD.app -dmg
+          mv build/OpenSCAD.dmg OpenSCAD-${{ matrix.arch }}.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: OpenSCAD-macOS-${{ matrix.arch }}
-          path: build/OpenSCAD-${{ matrix.arch }}.dmg
+          path: OpenSCAD-${{ matrix.arch }}.dmg
           if-no-files-found: error
 
   release:
@@ -88,11 +81,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: false
+          merge-multiple: true
 
       - name: Create timestamped release
         env:
@@ -102,9 +95,9 @@ jobs:
           TIMESTAMP=$(date -u '+%Y%m%d-%H%M%S')
           TAG="build-${TIMESTAMP}"
           TITLE="OpenSCAD macOS build ${TIMESTAMP}"
-          NOTES="Built from openscad/openscad ref \`${{ inputs.openscad_ref }}\` on $(date -u '+%Y-%m-%d %H:%M UTC')"
+          NOTES="Built from openscad/openscad ref \`${{ inputs.openscad_ref }}\` on $(date -u '+%Y-%m-%d %H:%M UTC')."
 
           gh release create "$TAG" \
             --title "$TITLE" \
             --notes "$NOTES" \
-            artifacts/**/*.dmg
+            artifacts/*.dmg
