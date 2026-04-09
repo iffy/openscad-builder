@@ -13,15 +13,8 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.arch }})
-    runs-on: macos-14
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-          - arch: x86_64
-
+    name: Build
+    runs-on: macos-latest
     steps:
       - name: Checkout OpenSCAD
         uses: actions/checkout@v4
@@ -33,26 +26,13 @@ jobs:
       - name: Install build prerequisites
         run: brew install automake libtool cmake pkg-config wget meson python-packaging
 
-      - name: Install x86_64 Homebrew (Rosetta)
-        if: matrix.arch == 'x86_64'
-        run: |
-          arch -x86_64 /bin/bash -c \
-            "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
-
       - name: Install dependencies
-        run: |
-          if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            arch -x86_64 ./scripts/macosx-build-homebrew.sh
-          else
-            ./scripts/macosx-build-homebrew.sh
-          fi
+        run: ./scripts/macosx-build-homebrew.sh
 
       - name: Configure
         run: |
           source scripts/setenv-macos.sh
-          cmake -B build \
-            -DEXPERIMENTAL=1 \
-            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          cmake -B build -DEXPERIMENTAL=1
 
       - name: Build
         run: |
@@ -68,13 +48,12 @@ jobs:
         run: |
           source scripts/setenv-macos.sh
           "$OPENSCAD_LIBRARIES/bin/macdeployqt" build/OpenSCAD.app -dmg
-          mv build/OpenSCAD.dmg OpenSCAD-${{ matrix.arch }}.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenSCAD-macOS-${{ matrix.arch }}
-          path: OpenSCAD-${{ matrix.arch }}.dmg
+          name: OpenSCAD-macOS-arm64
+          path: build/OpenSCAD.dmg
           if-no-files-found: error
 
   release:
