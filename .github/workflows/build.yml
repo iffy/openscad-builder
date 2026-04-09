@@ -1,0 +1,110 @@
+name: Build OpenSCAD for macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      openscad_ref:
+        description: 'OpenSCAD git ref to build (branch, tag, or SHA)'
+        required: false
+        default: 'master'
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13
+          - arch: arm64
+            runner: macos-14
+
+    steps:
+      - name: Checkout OpenSCAD
+        uses: actions/checkout@v4
+        with:
+          repository: openscad/openscad
+          ref: ${{ inputs.openscad_ref }}
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install --quiet \
+            cmake ninja \
+            qt@5 \
+            cgal \
+            boost \
+            eigen \
+            glew \
+            glib \
+            fontconfig \
+            freetype \
+            harfbuzz \
+            double-conversion \
+            lib3mf \
+            gettext \
+            imagemagick \
+            opencsg
+
+      - name: Configure
+        run: |
+          mkdir build
+          cd build
+          cmake .. \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+            -DUSE_BUILTIN_OPENCSG=OFF
+
+      - name: Build
+        run: |
+          cd build
+          ninja -j$(sysctl -n hw.logicalcpu)
+
+      - name: Package app bundle
+        run: |
+          cd build
+          # Bundle Qt and other libs into the .app
+          QT_BIN="$(brew --prefix qt@5)/bin"
+          "$QT_BIN/macdeployqt" OpenSCAD.app -dmg
+          # Rename so artifact filenames are distinct
+          mv OpenSCAD.dmg OpenSCAD-${{ matrix.arch }}.dmg
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenSCAD-macOS-${{ matrix.arch }}
+          path: build/OpenSCAD-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Create timestamped release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TIMESTAMP=$(date -u '+%Y%m%d-%H%M%S')
+          TAG="build-${TIMESTAMP}"
+          TITLE="OpenSCAD macOS build ${TIMESTAMP}"
+          NOTES="Built from openscad/openscad ref \`${{ inputs.openscad_ref }}\` on $(date -u '+%Y-%m-%d %H:%M UTC')"
+
+          gh release create "$TAG" \
+            --title "$TITLE" \
+            --notes "$NOTES" \
+            artifacts/**/*.dmg
