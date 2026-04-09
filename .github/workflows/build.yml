@@ -2,6 +2,8 @@ name: Build OpenSCAD for macOS
 
 on:
   push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       openscad_ref:
