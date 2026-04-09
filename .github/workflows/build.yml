@@ -20,9 +20,7 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            dep_flag: -a
           - arch: x86_64
-            dep_flag: -x
 
     steps:
       - name: Checkout OpenSCAD
@@ -35,16 +33,19 @@ jobs:
       - name: Install build prerequisites
         run: brew install automake libtool cmake pkg-config wget meson python-packaging
 
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: ../libraries
-          key: macos-deps-${{ matrix.arch }}-${{ hashFiles('scripts/macosx-build-dependencies.sh') }}
-
-      - name: Build dependencies
+      - name: Install x86_64 Homebrew (Rosetta)
+        if: matrix.arch == 'x86_64'
         run: |
-          source scripts/setenv-macos.sh
-          ./scripts/macosx-build-dependencies.sh ${{ matrix.dep_flag }}
+          arch -x86_64 /bin/bash -c \
+            "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            arch -x86_64 ./scripts/macosx-build-homebrew.sh
+          else
+            ./scripts/macosx-build-homebrew.sh
+          fi
 
       - name: Configure
         run: |
