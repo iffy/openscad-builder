@@ -26,28 +26,40 @@ jobs:
       - name: Install build prerequisites
         run: brew install automake libtool cmake pkg-config wget meson python-packaging
 
+      - name: Cache Homebrew bottles
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: homebrew-${{ hashFiles('scripts/macosx-build-homebrew.sh') }}
+          restore-keys: homebrew-
+
       - name: Install dependencies
         run: ./scripts/macosx-build-homebrew.sh
 
       - name: Configure
+        env:
+          OPENSCAD_LIBRARIES: /opt/homebrew
         run: |
-          source scripts/setenv-macos.sh
-          cmake -B build -DEXPERIMENTAL=1
+          cmake -B build \
+            -DEXPERIMENTAL=1 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=/opt/homebrew \
+            -DCMAKE_LIBRARY_PATH=/opt/homebrew/lib \
+            -DCMAKE_INCLUDE_PATH=/opt/homebrew/include \
+            -DDoubleConversion_LIBRARYDIR=/opt/homebrew/lib \
+            -DDoubleConversion_INCLUDEDIR=/opt/homebrew/include \
+            -DEigen3_DIR=/opt/homebrew/share/eigen3/cmake \
+            -DBoost_DIR=$(ls -d /opt/homebrew/lib/cmake/Boost-*) \
+            -DCGAL_DIR=/opt/homebrew/lib/cmake/CGAL
 
       - name: Build
-        run: |
-          source scripts/setenv-macos.sh
-          cmake --build build -j$(sysctl -n hw.logicalcpu)
+        run: cmake --build build -j$(sysctl -n hw.logicalcpu)
 
       - name: Install
-        run: |
-          source scripts/setenv-macos.sh
-          cmake --install build
+        run: cmake --install build
 
       - name: Package as DMG
-        run: |
-          source scripts/setenv-macos.sh
-          "$OPENSCAD_LIBRARIES/bin/macdeployqt" build/OpenSCAD.app -dmg
+        run: /opt/homebrew/bin/macdeployqt build/OpenSCAD.app -dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
